@@ -139,12 +139,13 @@ category_hints = {
 category_list = ", ".join([f"{k} ({v})" for k, v in category_hints.items()])
 
 def generate_prompt(comment):
-    return f"Here is the comment: '{comment}'
+    return f"""Here is the comment: '{comment}'
 
 Here are the categories with hints:
 {category_list}
 
-Return a comma-separated list of relevant category names only. Leave blank if none."
+Return a comma-separated list of relevant category names only. Leave blank if none."""
+
 if uploaded_file:
     df = pd.read_csv(uploaded_file)
     df.columns = df.columns.str.strip().str.replace("﻿", "", regex=False)
