@@ -1,0 +1,6 @@
+[theme]
+primaryColor = "#ff69b4"        # Pink
+backgroundColor = "#e6f0ff"     # Soft blue
+secondaryBackgroundColor = "#ffffff"
+textColor = "#001F3F"
+font = "sans serif"
