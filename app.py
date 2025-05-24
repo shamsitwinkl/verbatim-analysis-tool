@@ -171,6 +171,8 @@ if uploaded_file:
         if analysis_type != "Regex only":
             try:
                 prompt = generate_prompt(comment)
+                st.text(f"[{i+1}] PROMPT SENT TO GPT:
+{prompt}")
                 response = client.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[
@@ -180,6 +182,7 @@ if uploaded_file:
                     max_tokens=80
                 )
                 gpt_cats = response.choices[0].message.content.strip()
+                st.text(f"[{i+1}] GPT Response: {gpt_cats}")
                 if gpt_cats.lower() in ["none", "no match", "nothing applies", "nothing"]:
                     gpt_cats = ""
             except Exception as e:
