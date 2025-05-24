@@ -2,18 +2,17 @@ import streamlit as st
 import pandas as pd
 import re
 import openai
+import os  # ✅ Added to support os.getenv()
 
-# 🔐 Secure API key loading
-openai.api_key = st.secrets["openai"]["api_key"]
+# ✅ Load key from Render's secure environment variable
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# 🎨 Branding and description
 st.title("💬 Verbatim Analysis Tool")
 st.markdown("""
 This tool analyzes only the **`additional_comment`** column in your `.csv` file using **Regex + GPT-4o**.  
-It enriches the file and returns all original columns **plus** the AI categorization columns.
+It enriches the file and returns all original columns **plus** AI categorization columns.
 """)
 
-# 🧠 Regex dictionary (40 rules)
 regex_patterns = {
     "Search/Navigation": r"(?i)finding|to find|problem finding|issue|where.*find",
     "Resource Mention": r"(?i)worksheet|resource|work sheet|activity pack",
@@ -60,7 +59,6 @@ regex_patterns = {
 def match_categories(text):
     return [label for label, pattern in regex_patterns.items() if re.search(pattern, text, re.IGNORECASE)]
 
-# 🧠 File Upload and Processing
 uploaded_file = st.file_uploader("📤 Upload your .csv file", type=["csv"])
 
 if uploaded_file:
@@ -78,11 +76,8 @@ if uploaded_file:
 
     for i, row in df.iterrows():
         comment = str(row["additional_comment"])
-
-        # Regex matching
         regex_cats = match_categories(comment)
 
-        # GPT Matching
         try:
             response = openai.ChatCompletion.create(
                 model="gpt-4o",
