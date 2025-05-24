@@ -33,7 +33,7 @@ It enriches the file and returns all original columns **plus** AI/Regex categori
 
 🧠 **Bonus:** At the end, it estimates **OpenAI API token usage and cost** based on character count in your data.
 
-⚠️ If GPT categorization fails, the app will display a descriptive error message to help you troubleshoot.
+🌱 If you have any issues, contact james.shamsi@twinkl.co.uk
 """)
 
 # User selection for analysis type
@@ -153,14 +153,22 @@ if uploaded_file:
     output_cost = (output_tokens / 1000) * 0.015
     estimated_cost = input_cost + output_cost
 
+    if analysis_type != "Regex only":
     st.markdown("### 💸 Estimated API Cost")
     st.markdown(f"""
+    These estimates are based on **GPT-4o Mini** pricing:
+    - $0.005 per 1K input tokens
+    - $0.015 per 1K output tokens
+
     - Approx. input tokens: **{int(input_tokens):,}** → **${input_cost:.2f}**  
     - Approx. output tokens: **{int(output_tokens):,}** → **${output_cost:.2f}**  
     - 💰 **Estimated total cost: ${estimated_cost:.2f} USD**
     """)
+else:
+    st.markdown("### 💸 AI Enhancement Estimate")
+    st.info(f"This run used only Regex matching. Based on your data, using **GPT-4o Mini** would cost roughly **${(input_cost + output_cost):.2f} USD** for more accurate AI categorization. 🧠")
 
-    st.markdown("### 📊 Category Match Summary")
+st.markdown("### 📊 Category Match Summary")
     fig, ax = plt.subplots(figsize=(8, 5))
     top_counts = dict(category_counter.most_common(10))
     ax.barh(list(top_counts.keys()), list(top_counts.values()))
