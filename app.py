@@ -11,6 +11,8 @@ import io
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import threading
+import string
+import numpy as np
 
 # ✅ Password gate before anything else
 st.set_page_config(page_title="Verbatim Categorizer Tool", layout="centered")
@@ -52,10 +54,17 @@ except Exception as e:
 st.title("💖 Verbatim Categorizer Tool")
 
 st.markdown("""
-This tool analyzes only the **`additional_comment`** column in your `.csv` file using **Regex**, **GPT-4o Mini**, or both. 
-It enriches the file and returns all original columns **plus** AI/Regex categorization columns.
+This tool analyzes text feedback columns in your `.csv` file using **Regex**, **GPT-4o Mini**, or both approaches.
+
+🔍 **Smart Column Detection**: If your file doesn't have an `additional_comment` column, the tool will automatically detect the best text column for analysis by examining:
+- Average text length and complexity
+- Punctuation usage patterns  
+- Response uniqueness and variety
+- Column naming patterns
 
 🧠 Before processing, it estimates **OpenAI API token usage and cost** based on character count in your data.
+
+🎯 The tool enriches your file and returns all original columns **plus** new AI/Regex categorization columns.
 
 🌱 If you have any issues, contact james.shamsi@twinkl.co.uk
 """)
@@ -117,6 +126,85 @@ regex_patterns = {
     "Subject Mention": r"(?i)maths|science|history|english|geography",
     "Topic Request": r"(?i)do you have|can you make|topic request"
 }
+
+# ----------------------------------------
+# SMART COLUMN DETECTION FUNCTIONS
+# ----------------------------------------
+
+def detect_freeform_text_column(df, penalty_for_low_uniqueness=0.4):
+    """
+    Detect the best column for freeform text analysis using heuristics:
+    - Average text length
+    - Punctuation usage  
+    - Response uniqueness
+    - Column naming patterns
+    """
+    text_cols = df.select_dtypes(include=['object']).columns.tolist()
+    if not text_cols:
+        return None, None
+    
+    scores = {}
+    detailed_analysis = {}
+    
+    for col in text_cols:
+        series = df[col].dropna().astype(str)
+        if series.empty:
+            continue
+            
+        # Calculate metrics
+        avg_len = series.apply(len).mean()
+        punct_counts = series.apply(lambda x: sum(1 for char in x if char in string.punctuation))
+        avg_punct = punct_counts.mean()
+        total = len(series)
+        unique_ratio = series.nunique() / total if total else 0
+        
+        # Store detailed analysis for explanation
+        detailed_analysis[col] = {
+            'avg_length': round(avg_len, 1),
+            'avg_punctuation': round(avg_punct, 1),
+            'uniqueness_ratio': round(unique_ratio, 3),
+            'total_responses': total
+        }
+        
+        scores[col] = {
+            'avg_len': avg_len,
+            'avg_punct': avg_punct,
+            'unique_ratio': unique_ratio,
+        }
+    
+    if not scores:
+        return None, None
+    
+    # Normalize scores across all columns
+    max_len = max(s['avg_len'] for s in scores.values()) or 1e-9
+    max_punct = max(s['avg_punct'] for s in scores.values()) or 1e-9
+    
+    composite_scores = {}
+    for col, s in scores.items():
+        norm_len = s['avg_len'] / max_len
+        norm_punct = s['avg_punct'] / max_punct
+        comp_score = (0.4 * norm_len) + (0.3 * norm_punct) + (0.3 * s['unique_ratio'])
+        
+        # Column name bonuses
+        col_lower = col.lower()
+        if any(keyword in col_lower for keyword in ['comment', 'feedback', 'response', 'reason', 'text']):
+            comp_score *= 2.0
+            detailed_analysis[col]['name_bonus'] = "✅ Contains feedback-related keywords"
+        else:
+            detailed_analysis[col]['name_bonus'] = "❌ No feedback keywords in name"
+            
+        # Penalty for low uniqueness
+        if s['unique_ratio'] < penalty_for_low_uniqueness:
+            comp_score *= 0.6
+            detailed_analysis[col]['uniqueness_penalty'] = f"⚠️ Low uniqueness ({s['unique_ratio']:.1%})"
+        else:
+            detailed_analysis[col]['uniqueness_penalty'] = f"✅ Good uniqueness ({s['unique_ratio']:.1%})"
+        
+        composite_scores[col] = comp_score
+        detailed_analysis[col]['final_score'] = round(comp_score, 3)
+    
+    best_col = max(composite_scores, key=composite_scores.get)
+    return best_col, detailed_analysis
 
 def match_categories(text):
     """Match regex patterns against text"""
@@ -206,26 +294,92 @@ if uploaded_file:
         df = pd.read_csv(uploaded_file)
         df.columns = df.columns.str.strip().str.replace("﻿", "", regex=False)
         
-        if "additional_comment" not in df.columns:
-            st.error("❌ Column 'additional_comment' not found in file.")
-            st.write("Available columns:", list(df.columns))
-            st.stop()
+        # Smart column detection
+        target_column = None
+        used_auto_detection = False
+        
+        if "additional_comment" in df.columns:
+            target_column = "additional_comment"
+            st.success("✅ Found `additional_comment` column - using this for analysis")
+        else:
+            st.warning("⚠️ Column `additional_comment` not found. Running smart column detection...")
+            
+            detected_col, analysis_details = detect_freeform_text_column(df)
+            
+            if detected_col:
+                target_column = detected_col
+                used_auto_detection = True
+                
+                # Show detailed explanation
+                st.info(f"🤖 **Auto-detected column**: `{detected_col}`")
+                
+                with st.expander("🔍 See detection reasoning and column analysis"):
+                    st.markdown("### Column Analysis Results")
+                    
+                    # Create a comparison table
+                    comparison_data = []
+                    for col, details in analysis_details.items():
+                        comparison_data.append({
+                            'Column': col,
+                            'Avg Length': details['avg_length'],
+                            'Avg Punctuation': details['avg_punctuation'],
+                            'Uniqueness': f"{details['uniqueness_ratio']:.1%}",
+                            'Responses': details['total_responses'],
+                            'Final Score': details['final_score'],
+                            'Selected': '✅' if col == detected_col else '❌'
+                        })
+                    
+                    comparison_df = pd.DataFrame(comparison_data)
+                    comparison_df = comparison_df.sort_values('Final Score', ascending=False)
+                    st.dataframe(comparison_df, use_container_width=True)
+                    
+                    st.markdown("### Why this column was selected:")
+                    selected_details = analysis_details[detected_col]
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.markdown("**✅ Positive factors:**")
+                        st.write(f"• Average length: {selected_details['avg_length']} characters")
+                        st.write(f"• Punctuation usage: {selected_details['avg_punctuation']} marks per response")
+                        st.write(f"• {selected_details['name_bonus']}")
+                        
+                    with col2:
+                        st.markdown("**⚠️ Assessment:**")
+                        st.write(f"• {selected_details['uniqueness_penalty']}")
+                        st.write(f"• Total responses: {selected_details['total_responses']}")
+                        st.write(f"• Final score: {selected_details['final_score']}")
+                    
+                    st.markdown("**🧠 How it works:**")
+                    st.markdown("""
+                    The tool analyzes each text column using these criteria:
+                    - **Length** (40%): Longer responses typically contain more detailed feedback
+                    - **Punctuation** (30%): More punctuation suggests natural language 
+                    - **Uniqueness** (30%): Higher variety indicates genuine responses vs. dropdown values
+                    - **Name bonus**: Columns with 'comment', 'feedback', 'response' etc. get priority
+                    """)
+                    
+            else:
+                st.error("❌ Could not auto-detect a suitable text column for analysis.")
+                st.write("**Available columns:**", list(df.columns))
+                st.write("**Suggestion:** Ensure your CSV has a column with text feedback/comments.")
+                st.stop()
         
         # Show preview
         st.subheader("📊 Data Preview")
+        st.write(f"**Target column for analysis:** `{target_column}`")
         st.write(f"Total rows: {len(df)}")
         st.dataframe(df.head())
         
         # Filter out empty comments
-        non_empty_df = df[df["additional_comment"].notna() & (df["additional_comment"].str.strip() != "")]
-        st.write(f"Rows with comments to analyze: {len(non_empty_df)}")
+        non_empty_df = df[df[target_column].notna() & (df[target_column].astype(str).str.strip() != "")]
+        st.write(f"Rows with text to analyze: {len(non_empty_df)}")
         
         if len(non_empty_df) == 0:
-            st.warning("⚠️ No non-empty comments found to analyze.")
+            st.warning("⚠️ No non-empty text found to analyze in the selected column.")
             st.stop()
         
         # Calculate total characters for cost estimation
-        total_chars = sum(len(str(comment)) for comment in non_empty_df["additional_comment"])
+        total_chars = sum(len(str(comment)) for comment in non_empty_df[target_column])
         processed_count = len(non_empty_df)
         
         # Show cost estimation BEFORE analysis (only for AI analysis)
@@ -307,9 +461,9 @@ if uploaded_file:
             indices_to_process = []
             
             for i, row in df.iterrows():
-                if pd.isna(row["additional_comment"]) or str(row["additional_comment"]).strip() == "":
+                if pd.isna(row[target_column]) or str(row[target_column]).strip() == "":
                     continue
-                comments_to_process.append(str(row["additional_comment"]))
+                comments_to_process.append(str(row[target_column]))
                 indices_to_process.append(i)
             
             # Process in batches for GPT
@@ -372,6 +526,12 @@ if uploaded_file:
             # Display results
             st.subheader("📈 Analysis Results")
             
+            # Show which column was analyzed
+            if used_auto_detection:
+                st.info(f"✨ **Analyzed column:** `{target_column}` (auto-detected)")
+            else:
+                st.info(f"✨ **Analyzed column:** `{target_column}` (found directly)")
+            
             col1, col2, col3, col4 = st.columns(4)
             with col1:
                 st.metric("Total Comments", len(comments_to_process))
@@ -413,8 +573,12 @@ if uploaded_file:
             
             # Show sample results
             st.subheader("🔍 Sample Results")
+            display_cols = [target_column, "Regex Categories", "GPT Categories", "Total Categories Found"]
             sample_df = df[df["Total Categories Found"] > 0].head(5)
-            st.dataframe(sample_df[["additional_comment", "Regex Categories", "GPT Categories", "Total Categories Found"]])
+            if not sample_df.empty:
+                st.dataframe(sample_df[display_cols])
+            else:
+                st.write("No categorized results to show in sample.")
     
     except Exception as e:
         st.error(f"❌ Error processing file: {str(e)}")
