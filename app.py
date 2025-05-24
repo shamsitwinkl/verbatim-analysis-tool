@@ -3,6 +3,7 @@ import pandas as pd
 import re
 import openai
 import os
+from openai import OpenAI
 
 # ✅ Password gate before anything else
 st.set_page_config(page_title="Verbatim Analysis Tool", layout="centered")
@@ -19,7 +20,7 @@ api_key = os.getenv("OPENAI_API_KEY")
 if not api_key:
     st.error("❌ OPENAI_API_KEY environment variable not set. Please check your Render settings.")
     st.stop()
-openai.api_key = api_key
+client = OpenAI(api_key=api_key)
 
 # 🎨 Tool Info
 st.title("💖 Verbatim Analysis Tool")
@@ -33,15 +34,15 @@ It enriches the file and returns all original columns **plus** AI categorization
 ⚠️ If GPT categorization fails, the app will display a descriptive error message to help you troubleshoot.
 """)
 
-# Regex patterns
+# Regex patterns (40 total)
 regex_patterns = {
     "Search/Navigation": r"(?i)finding|to find|problem finding|issue|where.*find",
     "Resource Mention": r"(?i)worksheet|resource|work sheet|activity pack",
-    "User Question": r"(?i)\\b(what|where|when|why|how|who|which|can|could|should)\\b",
-    "Translation Mention": r"(?i)\\btranslation\\b|\\btranslated\\b|\\btranslating\\b",
+    "User Question": r"(?i)\b(what|where|when|why|how|who|which|can|could|should)\b",
+    "Translation Mention": r"(?i)\btranslation\b|\btranslated\b|\btranslating\b",
     "User Suggestion": r"(?i)suggestion|should|could|would|suggest|recommend",
     "Pain Point": r"(?i)problem|issue|bug|error|difficult",
-    "AI": r"(?i)\\bAI\\b|artificial intelligence|machine learning",
+    "AI": r"(?i)\bAI\b|artificial intelligence|machine learning",
     "Competitor": r"(?i)competitor|another provider|used to use",
     "Site Error": r"(?i)website error|site down|page missing",
     "Social Media": r"(?i)facebook|meta|instagram|twitter|social media",
@@ -49,7 +50,7 @@ regex_patterns = {
     "Twinkl Mention": r"(?i)twinkl",
     "Download Trouble": r"(?i)can't download|not downloading|download problem",
     "Payment Problem": r"(?i)payment|charge|billing|credit card",
-    "Video Mention": r"(?i)\\bvideo\\b|watch|YouTube",
+    "Video Mention": r"(?i)\bvideo\b|watch|YouTube",
     "Navigation": r"(?i)hard to find|navigation|menu|confusing",
     "Positive Experience": r"(?i)love|great|excellent|helpful|amazing",
     "Negative Experience": r"(?i)bad|hate|useless|frustrating|annoying",
@@ -58,7 +59,7 @@ regex_patterns = {
     "Account Access": r"(?i)account locked|cannot access",
     "Already Cancelled": r"(?i)cancel|canceled|cancelled|already cancelled",
     "Auto-renwal": r"(?i)auto.?renew|automatic renewal",
-    "Book Club": r"(?i)\\bbook club\\b|\\bbooks\\b",
+    "Book Club": r"(?i)\bbook club\b|\bbooks\b",
     "Cancellation difficulty": r"(?i)cancel(l|ing|led)? difficulty|can't cancel",
     "CS General": r"(?i)customer service|support team|agent",
     "CS Negative": r"(?i)(customer service|support).*(bad|unhelpful|rude)",
@@ -69,7 +70,7 @@ regex_patterns = {
     "Teacher Reference": r"(?i)i teach|my class|my students",
     "Child Mention": r"(?i)my child|son|daughter|kids",
     "Feedback General": r"(?i)feedback|thoughts|suggestions",
-    "Language Mention": r"(?i)\\benglish\\b|\\bspanish\\b|\\bfrench\\b",
+    "Language Mention": r"(?i)\benglish\b|\bspanish\b|\bfrench\b",
     "Error Feedback": r"(?i)wrong|error|typo|fix this",
     "Membership Issue": r"(?i)member(ship)?|sign up|join",
     "Mobile Use": r"(?i)phone|mobile|tablet|app",
@@ -105,7 +106,7 @@ if uploaded_file:
             prompt = f"Text: '{comment}'\nCategories: {list(regex_patterns.keys())}\nReturn matching category names only (comma-separated). Leave blank if none."
             print("Sending prompt to GPT:", prompt)
 
-            response = openai.ChatCompletion.create(
+            response = client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
                     {"role": "system", "content": "Classify the text using the following list. Return matching category names only. If none match, return nothing."},
