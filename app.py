@@ -56,10 +56,9 @@ st.title("💖 Verbatim Categorizer Tool")
 st.markdown("""
 This tool analyzes text feedback columns in your `.csv` file using **Regex**, **GPT-4o Mini**, or both approaches.
 
-🔍 **Smart Column Detection**: If your file doesn't have an `additional_comment` column, the tool will automatically detect the best text column for analysis by examining things like average text length and complexity
-- Punctuation usage patterns and more.  
+🔍 If your file doesn't have an `additional_comment` column, this tool will detect the best text column for response categorisation by examining things like avg text length and complexity.
 
-🧠 Before processing, it estimates **OpenAI API token usage and cost** based on character count in your data.
+🧠 Before processing, the tool will estimate the **OpenAI API token usage and cost** based on character count in your data.
 
 🎯 The tool enriches your file and returns all original columns **plus** new AI/Regex categorization columns.
 
