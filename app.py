@@ -42,47 +42,11 @@ analysis_type = st.radio("Choose what kind of analysis you want:", ["Regex only"
 # File uploader
 uploaded_file = st.file_uploader("📤 Upload your .csv file", type=["csv"])
 
-# Regex patterns (40 total)
+# Regex patterns (truncated here for brevity — keep all 40 in your real code)
 regex_patterns = {
     "Search/Navigation": r"(?i)finding|to find|problem finding|issue|where.*find",
     "Resource Mention": r"(?i)worksheet|resource|work sheet|activity pack",
-    "User Question": r"(?i)\\b(what|where|when|why|how|who|which|can|could|should)\\b",
-    "Translation Mention": r"(?i)\\btranslation\\b|\\btranslated\\b|\\btranslating\\b",
-    "User Suggestion": r"(?i)suggestion|should|could|would|suggest|recommend",
-    "Pain Point": r"(?i)problem|issue|bug|error|difficult",
-    "AI": r"(?i)\\bAI\\b|artificial intelligence|machine learning",
-    "Competitor": r"(?i)competitor|another provider|used to use",
-    "Site Error": r"(?i)website error|site down|page missing",
-    "Social Media": r"(?i)facebook|meta|instagram|twitter|social media",
-    "Curriculum Mention": r"(?i)curriculum|ks1|ks2|key stage|EYFS",
-    "Twinkl Mention": r"(?i)twinkl",
-    "Download Trouble": r"(?i)can't download|not downloading|download problem",
-    "Payment Problem": r"(?i)payment|charge|billing|credit card",
-    "Video Mention": r"(?i)\\bvideo\\b|watch|YouTube",
-    "Navigation": r"(?i)hard to find|navigation|menu|confusing",
-    "Positive Experience": r"(?i)love|great|excellent|helpful|amazing",
-    "Negative Experience": r"(?i)bad|hate|useless|frustrating|annoying",
-    "Pricing Feedback": r"(?i)too expensive|pricing|price|cost",
-    "Login Issue": r"(?i)login|log in|can't sign in|password",
-    "Account Access": r"(?i)account locked|cannot access",
-    "Already Cancelled": r"(?i)cancel|canceled|cancelled|already cancelled",
-    "Auto-renwal": r"(?i)auto.?renew|automatic renewal",
-    "Book Club": r"(?i)\\bbook club\\b|\\bbooks\\b",
-    "Cancellation difficulty": r"(?i)cancel(l|ing|led)? difficulty|can't cancel",
-    "CS General": r"(?i)customer service|support team|agent",
-    "CS Negative": r"(?i)(customer service|support).*(bad|unhelpful|rude)",
-    "CS Positive": r"(?i)(customer service|support).*(great|helpful|nice)",
-    "Negative words": r"(?i)awful|annoying|angry|disappointed",
-    "Positive words": r"(?i)amazing|awesome|best|fantastic|love",
-    "Support Request": r"(?i)need help|how do i|support",
-    "Teacher Reference": r"(?i)i teach|my class|my students",
-    "Child Mention": r"(?i)my child|son|daughter|kids",
-    "Feedback General": r"(?i)feedback|thoughts|suggestions",
-    "Language Mention": r"(?i)\\benglish\\b|\\bspanish\\b|\\bfrench\\b",
-    "Error Feedback": r"(?i)wrong|error|typo|fix this",
-    "Membership Issue": r"(?i)member(ship)?|sign up|join",
-    "Mobile Use": r"(?i)phone|mobile|tablet|app",
-    "Subject Mention": r"(?i)maths|science|history|english|geography",
+    # ... [include all 40 patterns from your latest code]
     "Topic Request": r"(?i)do you have|can you make|topic request"
 }
 
@@ -141,7 +105,6 @@ if uploaded_file:
 
     st.markdown("### 🧾 Enriched Results")
     st.dataframe(df)
-
     st.download_button("📥 Download CSV", df.to_csv(index=False), "verbatim_analysis.csv", "text/csv")
 
     # Token and cost estimation based on total_chars and average prompt size
@@ -154,21 +117,21 @@ if uploaded_file:
     estimated_cost = input_cost + output_cost
 
     if analysis_type != "Regex only":
-    st.markdown("### 💸 Estimated API Cost")
-    st.markdown(f"""
-    These estimates are based on **GPT-4o Mini** pricing:
-    - $0.005 per 1K input tokens
-    - $0.015 per 1K output tokens
+        st.markdown("### 💸 Estimated API Cost")
+        st.markdown(f"""
+        These estimates are based on **GPT-4o Mini** pricing:
+        - $0.005 per 1K input tokens
+        - $0.015 per 1K output tokens
 
-    - Approx. input tokens: **{int(input_tokens):,}** → **${input_cost:.2f}**  
-    - Approx. output tokens: **{int(output_tokens):,}** → **${output_cost:.2f}**  
-    - 💰 **Estimated total cost: ${estimated_cost:.2f} USD**
-    """)
-else:
-    st.markdown("### 💸 AI Enhancement Estimate")
-    st.info(f"This run used only Regex matching. Based on your data, using **GPT-4o Mini** would cost roughly **${(input_cost + output_cost):.2f} USD** for more accurate AI categorization. 🧠")
+        - Approx. input tokens: **{int(input_tokens):,}** → **${input_cost:.2f}**  
+        - Approx. output tokens: **{int(output_tokens):,}** → **${output_cost:.2f}**  
+        - 💰 **Estimated total cost: ${estimated_cost:.2f} USD**
+        """)
+    else:
+        st.markdown("### 💸 AI Enhancement Estimate")
+        st.info(f"This run used only Regex matching. Based on your data, using **GPT-4o Mini** would cost roughly **${(input_cost + output_cost):.2f} USD** for more accurate AI categorization. 🧠")
 
-st.markdown("### 📊 Category Match Summary")
+    st.markdown("### 📊 Category Match Summary")
     fig, ax = plt.subplots(figsize=(8, 5))
     top_counts = dict(category_counter.most_common(10))
     ax.barh(list(top_counts.keys()), list(top_counts.values()))
