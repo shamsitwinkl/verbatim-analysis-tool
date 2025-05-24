@@ -13,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 import threading
 
 # ✅ Password gate before anything else
-st.set_page_config(page_title="Verbatim Analysis Tool", layout="centered")
+st.set_page_config(page_title="Verbatim Categorizer Tool", layout="centered")
 
 # Initialize session state
 if 'authenticated' not in st.session_state:
@@ -49,13 +49,13 @@ except Exception as e:
     st.stop()
 
 # 🎨 Tool Info
-st.title("💖 Verbatim Analysis Tool")
+st.title("💖 Verbatim Categorizer Tool")
 
 st.markdown("""
 This tool analyzes only the **`additional_comment`** column in your `.csv` file using **Regex**, **GPT-4o Mini**, or both. 
 It enriches the file and returns all original columns **plus** AI/Regex categorization columns.
 
-🧠 At the end, it estimates **OpenAI API token usage and cost** based on character count in your data.
+🧠 Before processing, it estimates **OpenAI API token usage and cost** based on character count in your data.
 
 🌱 If you have any issues, contact james.shamsi@twinkl.co.uk
 """)
@@ -224,10 +224,65 @@ if uploaded_file:
             st.warning("⚠️ No non-empty comments found to analyze.")
             st.stop()
         
+        # Calculate total characters for cost estimation
+        total_chars = sum(len(str(comment)) for comment in non_empty_df["additional_comment"])
+        processed_count = len(non_empty_df)
+        
+        # Show cost estimation BEFORE analysis (only for AI analysis)
+        if analysis_type != "Regex only":
+            st.subheader("💰 OpenAI API Cost Estimation")
+            
+            cost_details = estimate_costs(total_chars, processed_count)
+            
+            # Create columns for cost breakdown
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("**Total Estimated Cost**", f"${cost_details['total_cost']:.4f}")
+            with col2:
+                st.metric("Input Cost", f"${cost_details['input_cost']:.4f}")
+            with col3:
+                st.metric("Output Cost", f"${cost_details['output_cost']:.4f}")
+            
+            # Detailed breakdown
+            st.markdown("#### 🔍 Calculation Breakdown")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown("""
+                **💰 GPT-4o Mini Token Pricing**
+                - **Input**: $0.15 per 1M tokens
+                - **Output**: $0.60 per 1M tokens
+                """)
+                
+            with col2:
+                st.markdown(f"""
+                **📊 Usage Statistics**
+                - **Total Characters**: {cost_details['total_chars']:,}
+                - **API Requests**: {cost_details['num_requests']:,}
+                - **Input Tokens**: {cost_details['input_tokens']:,.0f}
+                - **Output Tokens**: {cost_details['output_tokens']:,.0f}
+                """)
+            
+            # Calculation formula
+            with st.expander("📝 How We Calculate Costs"):
+                st.markdown(f"""
+                **Token Estimation:**
+                - Characters to tokens: ~4 characters = 1 token
+                - Input tokens = {cost_details['total_chars']:,} chars ÷ 4 = {cost_details['input_tokens']:,.0f} tokens
+                - Output tokens = {cost_details['num_requests']:,} requests × 20 avg tokens = {cost_details['output_tokens']:,.0f} tokens
+                
+                **Cost Calculation:**
+                - Input cost = ({cost_details['input_tokens']:,.0f} ÷ 1,000,000) × $0.15 = ${cost_details['input_cost']:.4f}
+                - Output cost = ({cost_details['output_tokens']:,.0f} ÷ 1,000,000) × $0.60 = ${cost_details['output_cost']:.4f}
+                - **Total = ${cost_details['total_cost']:.4f}**
+                
+                *Note: This is an estimate. Actual costs may vary slightly based on exact tokenization.*
+                """)
+        
         # Show estimated processing time
         if analysis_type != "Regex only":
             estimated_time = len(non_empty_df) * 0.5  # Rough estimate
-            if analysis_type != "Regex only" and 'batch_size' in locals():
+            if 'batch_size' in locals():
                 estimated_time = estimated_time / (batch_size / 10)  # Batching reduces time
             st.info(f"⏱️ Estimated processing time: {estimated_time/60:.1f} minutes")
         
@@ -240,7 +295,6 @@ if uploaded_file:
             df["GPT Categories"] = ""
             df["Total Categories Found"] = 0
             
-            total_chars = 0
             category_counter = Counter()
             processed_count = 0
             
@@ -257,7 +311,6 @@ if uploaded_file:
                     continue
                 comments_to_process.append(str(row["additional_comment"]))
                 indices_to_process.append(i)
-                total_chars += len(str(row["additional_comment"]))
             
             # Process in batches for GPT
             if analysis_type != "Regex only" and len(comments_to_process) > 0:
@@ -342,57 +395,6 @@ if uploaded_file:
                 ax.set_title("Top 10 Categories")
                 plt.tight_layout()
                 st.pyplot(fig)
-            
-            # Enhanced cost estimation
-            if analysis_type != "Regex only":
-                st.subheader("💰 OpenAI API Cost Estimation")
-                
-                cost_details = estimate_costs(total_chars, processed_count)
-                
-                # Create columns for cost breakdown
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("**Total Estimated Cost**", f"${cost_details['total_cost']:.4f}")
-                with col2:
-                    st.metric("Input Cost", f"${cost_details['input_cost']:.4f}")
-                with col3:
-                    st.metric("Output Cost", f"${cost_details['output_cost']:.4f}")
-                
-                # Detailed breakdown
-                st.markdown("#### 🔍 Calculation Breakdown")
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.markdown("""
-                    **💰 GPT-4o Mini Token Pricing**
-                    - **Input**: $0.15 per 1M tokens
-                    - **Output**: $0.60 per 1M tokens
-                    """)
-                    
-                with col2:
-                    st.markdown(f"""
-                    **📊 Usage Statistics**
-                    - **Total Characters**: {cost_details['total_chars']:,}
-                    - **API Requests**: {cost_details['num_requests']:,}
-                    - **Input Tokens**: {cost_details['input_tokens']:,.0f}
-                    - **Output Tokens**: {cost_details['output_tokens']:,.0f}
-                    """)
-                
-                # Calculation formula
-                with st.expander("📝 How We Calculate Costs"):
-                    st.markdown(f"""
-                    **Token Estimation:**
-                    - Characters to tokens: ~4 characters = 1 token
-                    - Input tokens = {cost_details['total_chars']:,} chars ÷ 4 = {cost_details['input_tokens']:,.0f} tokens
-                    - Output tokens = {cost_details['num_requests']:,} requests × 20 avg tokens = {cost_details['output_tokens']:,.0f} tokens
-                    
-                    **Cost Calculation:**
-                    - Input cost = ({cost_details['input_tokens']:,.0f} ÷ 1,000,000) × $0.15 = ${cost_details['input_cost']:.4f}
-                    - Output cost = ({cost_details['output_tokens']:,.0f} ÷ 1,000,000) × $0.60 = ${cost_details['output_cost']:.4f}
-                    - **Total = ${cost_details['total_cost']:.4f}**
-                    
-                    *Note: This is an estimate. Actual costs may vary slightly based on exact tokenization.*
-                    """)
             
             # Download processed file
             st.subheader("📥 Download Results")
