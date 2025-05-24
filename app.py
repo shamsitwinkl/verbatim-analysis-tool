@@ -4,11 +4,24 @@ import re
 import openai
 import os
 
-# ✅ Load OpenAI key securely
-openai.api_key = os.getenv("OPENAI_API_KEY")
-
-# 🎨 Title and description with updated model name and token cost explanation
+# ✅ Password gate before anything else
 st.set_page_config(page_title="Verbatim Analysis Tool", layout="centered")
+st.title("🔐 Enter Password")
+
+password = st.text_input("This tool is password protected. Please enter the password to continue:", type="password")
+
+if password != "5577":
+    st.warning("❌ Incorrect or missing password. Please contact james.shamsi@twinkl.co.uk to request access.")
+    st.stop()
+
+# ✅ Load OpenAI key securely and validate it's present
+api_key = os.getenv("OPENAI_API_KEY")
+if not api_key:
+    st.error("❌ OPENAI_API_KEY environment variable not set. Please check your Render settings.")
+    st.stop()
+openai.api_key = api_key
+
+# 🎨 Tool Info
 st.title("💖 Verbatim Analysis Tool")
 
 st.markdown("""
@@ -16,17 +29,19 @@ This tool analyzes only the **`additional_comment`** column in your `.csv` file 
 It enriches the file and returns all original columns **plus** AI categorization columns.  
 
 🧠 **Bonus:** At the end, it estimates **OpenAI API token usage and cost** based on character count in your data.
+
+⚠️ If GPT categorization fails, the app will display a descriptive error message to help you troubleshoot.
 """)
 
-# Regex patterns (40 total)
+# Regex patterns
 regex_patterns = {
     "Search/Navigation": r"(?i)finding|to find|problem finding|issue|where.*find",
     "Resource Mention": r"(?i)worksheet|resource|work sheet|activity pack",
-    "User Question": r"(?i)\b(what|where|when|why|how|who|which|can|could|should)\b",
-    "Translation Mention": r"(?i)\btranslation\b|\btranslated\b|\btranslating\b",
+    "User Question": r"(?i)\\b(what|where|when|why|how|who|which|can|could|should)\\b",
+    "Translation Mention": r"(?i)\\btranslation\\b|\\btranslated\\b|\\btranslating\\b",
     "User Suggestion": r"(?i)suggestion|should|could|would|suggest|recommend",
     "Pain Point": r"(?i)problem|issue|bug|error|difficult",
-    "AI": r"(?i)\bAI\b|artificial intelligence|machine learning",
+    "AI": r"(?i)\\bAI\\b|artificial intelligence|machine learning",
     "Competitor": r"(?i)competitor|another provider|used to use",
     "Site Error": r"(?i)website error|site down|page missing",
     "Social Media": r"(?i)facebook|meta|instagram|twitter|social media",
@@ -34,7 +49,7 @@ regex_patterns = {
     "Twinkl Mention": r"(?i)twinkl",
     "Download Trouble": r"(?i)can't download|not downloading|download problem",
     "Payment Problem": r"(?i)payment|charge|billing|credit card",
-    "Video Mention": r"(?i)\bvideo\b|watch|YouTube",
+    "Video Mention": r"(?i)\\bvideo\\b|watch|YouTube",
     "Navigation": r"(?i)hard to find|navigation|menu|confusing",
     "Positive Experience": r"(?i)love|great|excellent|helpful|amazing",
     "Negative Experience": r"(?i)bad|hate|useless|frustrating|annoying",
@@ -43,7 +58,7 @@ regex_patterns = {
     "Account Access": r"(?i)account locked|cannot access",
     "Already Cancelled": r"(?i)cancel|canceled|cancelled|already cancelled",
     "Auto-renwal": r"(?i)auto.?renew|automatic renewal",
-    "Book Club": r"(?i)\bbook club\b|\bbooks\b",
+    "Book Club": r"(?i)\\bbook club\\b|\\bbooks\\b",
     "Cancellation difficulty": r"(?i)cancel(l|ing|led)? difficulty|can't cancel",
     "CS General": r"(?i)customer service|support team|agent",
     "CS Negative": r"(?i)(customer service|support).*(bad|unhelpful|rude)",
@@ -54,7 +69,7 @@ regex_patterns = {
     "Teacher Reference": r"(?i)i teach|my class|my students",
     "Child Mention": r"(?i)my child|son|daughter|kids",
     "Feedback General": r"(?i)feedback|thoughts|suggestions",
-    "Language Mention": r"(?i)\benglish\b|\bspanish\b|\bfrench\b",
+    "Language Mention": r"(?i)\\benglish\\b|\\bspanish\\b|\\bfrench\\b",
     "Error Feedback": r"(?i)wrong|error|typo|fix this",
     "Membership Issue": r"(?i)member(ship)?|sign up|join",
     "Mobile Use": r"(?i)phone|mobile|tablet|app",
@@ -87,19 +102,22 @@ if uploaded_file:
         regex_cats = match_categories(comment)
 
         try:
+            prompt = f"Text: '{comment}'\nCategories: {list(regex_patterns.keys())}\nReturn matching category names only (comma-separated). Leave blank if none."
+            print("Sending prompt to GPT:", prompt)
+
             response = openai.ChatCompletion.create(
-                model="gpt-4o",
+                model="gpt-4o-mini",
                 messages=[
                     {"role": "system", "content": "Classify the text using the following list. Return matching category names only. If none match, return nothing."},
-                    {"role": "user", "content": f"Text: '{comment}'\nCategories: {list(regex_patterns.keys())}\nReturn matching category names only (comma-separated). Leave blank if none."}
+                    {"role": "user", "content": prompt}
                 ],
                 max_tokens=80
             )
             gpt_cats = response.choices[0].message.content.strip()
             if gpt_cats.lower() in ["none", "no match", "nothing applies", "nothing"]:
                 gpt_cats = ""
-        except:
-            gpt_cats = "GPT Error"
+        except Exception as e:
+            gpt_cats = f"GPT Error: {str(e)}"
 
         total_found = len(regex_cats) + (len(gpt_cats.split(",")) if gpt_cats else 0)
         df.at[i, "Regex Categories"] = ", ".join(regex_cats)
@@ -111,9 +129,8 @@ if uploaded_file:
 
     st.download_button("📥 Download CSV", df.to_csv(index=False), "verbatim_analysis.csv", "text/csv")
 
-    # Estimate tokens and cost based on characters (average 4 chars per token)
     approx_tokens = total_chars / 4
-    avg_input_ratio = 0.625  # ~50 input / 30 output tokens ratio
+    avg_input_ratio = 0.625
     input_tokens = approx_tokens * avg_input_ratio
     output_tokens = approx_tokens * (1 - avg_input_ratio)
 
