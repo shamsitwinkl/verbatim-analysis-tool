@@ -26,23 +26,26 @@ client = OpenAI(api_key=api_key)
 st.title("💖 Verbatim Analysis Tool")
 
 st.markdown("""
-This tool analyzes only the **`additional_comment`** column in your `.csv` file using **Regex + GPT-4o Mini**.  
-It enriches the file and returns all original columns **plus** AI categorization columns.  
+This tool analyzes only the **`additional_comment`** column in your `.csv` file using **Regex**, **GPT-4o Mini**, or both. 
+It enriches the file and returns all original columns **plus** AI/Regex categorization columns.
 
 🧠 **Bonus:** At the end, it estimates **OpenAI API token usage and cost** based on character count in your data.
 
 ⚠️ If GPT categorization fails, the app will display a descriptive error message to help you troubleshoot.
 """)
 
+# User selection for analysis type
+analysis_type = st.radio("Choose what kind of analysis you want:", ["Regex only", "AI only", "Combined Regex + AI"])
+
 # Regex patterns (40 total)
 regex_patterns = {
     "Search/Navigation": r"(?i)finding|to find|problem finding|issue|where.*find",
     "Resource Mention": r"(?i)worksheet|resource|work sheet|activity pack",
-    "User Question": r"(?i)\b(what|where|when|why|how|who|which|can|could|should)\b",
-    "Translation Mention": r"(?i)\btranslation\b|\btranslated\b|\btranslating\b",
+    "User Question": r"(?i)\\b(what|where|when|why|how|who|which|can|could|should)\\b",
+    "Translation Mention": r"(?i)\\btranslation\\b|\\btranslated\\b|\\btranslating\\b",
     "User Suggestion": r"(?i)suggestion|should|could|would|suggest|recommend",
     "Pain Point": r"(?i)problem|issue|bug|error|difficult",
-    "AI": r"(?i)\bAI\b|artificial intelligence|machine learning",
+    "AI": r"(?i)\\bAI\\b|artificial intelligence|machine learning",
     "Competitor": r"(?i)competitor|another provider|used to use",
     "Site Error": r"(?i)website error|site down|page missing",
     "Social Media": r"(?i)facebook|meta|instagram|twitter|social media",
@@ -50,7 +53,7 @@ regex_patterns = {
     "Twinkl Mention": r"(?i)twinkl",
     "Download Trouble": r"(?i)can't download|not downloading|download problem",
     "Payment Problem": r"(?i)payment|charge|billing|credit card",
-    "Video Mention": r"(?i)\bvideo\b|watch|YouTube",
+    "Video Mention": r"(?i)\\bvideo\\b|watch|YouTube",
     "Navigation": r"(?i)hard to find|navigation|menu|confusing",
     "Positive Experience": r"(?i)love|great|excellent|helpful|amazing",
     "Negative Experience": r"(?i)bad|hate|useless|frustrating|annoying",
@@ -59,7 +62,7 @@ regex_patterns = {
     "Account Access": r"(?i)account locked|cannot access",
     "Already Cancelled": r"(?i)cancel|canceled|cancelled|already cancelled",
     "Auto-renwal": r"(?i)auto.?renew|automatic renewal",
-    "Book Club": r"(?i)\bbook club\b|\bbooks\b",
+    "Book Club": r"(?i)\\bbook club\\b|\\bbooks\\b",
     "Cancellation difficulty": r"(?i)cancel(l|ing|led)? difficulty|can't cancel",
     "CS General": r"(?i)customer service|support team|agent",
     "CS Negative": r"(?i)(customer service|support).*(bad|unhelpful|rude)",
@@ -70,7 +73,7 @@ regex_patterns = {
     "Teacher Reference": r"(?i)i teach|my class|my students",
     "Child Mention": r"(?i)my child|son|daughter|kids",
     "Feedback General": r"(?i)feedback|thoughts|suggestions",
-    "Language Mention": r"(?i)\benglish\b|\bspanish\b|\bfrench\b",
+    "Language Mention": r"(?i)\\benglish\\b|\\bspanish\\b|\\bfrench\\b",
     "Error Feedback": r"(?i)wrong|error|typo|fix this",
     "Membership Issue": r"(?i)member(ship)?|sign up|join",
     "Mobile Use": r"(?i)phone|mobile|tablet|app",
@@ -81,69 +84,7 @@ regex_patterns = {
 def match_categories(text):
     return [label for label, pattern in regex_patterns.items() if re.search(pattern, text, re.IGNORECASE)]
 
-uploaded_file = st.file_uploader("📤 Upload your .csv file", type=["csv"])
-
-if uploaded_file:
-    df = pd.read_csv(uploaded_file)
-    df.columns = df.columns.str.strip().str.replace("\ufeff", "", regex=False)
-
-    if "additional_comment" not in df.columns:
-        st.error("❌ Column 'additional_comment' not found in file.")
-        st.write("Available columns:", list(df.columns))
-        st.stop()
-
-    df["Regex Categories"] = ""
-    df["GPT Categories"] = ""
-    df["Total Categories Found"] = 0
-
-    total_chars = 0
-    for i, row in df.iterrows():
-        comment = str(row["additional_comment"])
-        total_chars += len(comment)
-        regex_cats = match_categories(comment)
-
-        try:
-            prompt = f"Text: '{comment}'\nCategories: {list(regex_patterns.keys())}\nReturn matching category names only (comma-separated). Leave blank if none."
-            print("Sending prompt to GPT:", prompt)
-
-            response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": "Classify the text using the following list. Return matching category names only. If none match, return nothing."},
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=80
-            )
-            gpt_cats = response.choices[0].message.content.strip()
-            if gpt_cats.lower() in ["none", "no match", "nothing applies", "nothing"]:
-                gpt_cats = ""
-        except Exception as e:
-            gpt_cats = f"GPT Error: {str(e)}"
-
-        total_found = len(regex_cats) + (len(gpt_cats.split(",")) if gpt_cats else 0)
-        df.at[i, "Regex Categories"] = ", ".join(regex_cats)
-        df.at[i, "GPT Categories"] = gpt_cats
-        df.at[i, "Total Categories Found"] = total_found
-
-    st.markdown("### 🧾 Enriched Results")
-    st.dataframe(df)
-
-    st.download_button("📥 Download CSV", df.to_csv(index=False), "verbatim_analysis.csv", "text/csv")
-
-    approx_tokens = total_chars / 4
-    avg_input_ratio = 0.625
-    input_tokens = approx_tokens * avg_input_ratio
-    output_tokens = approx_tokens * (1 - avg_input_ratio)
-
-    input_cost = (input_tokens / 1000) * 0.005
-    output_cost = (output_tokens / 1000) * 0.015
-    estimated_cost = input_cost + output_cost
-
-    st.markdown("### 💸 Estimated API Cost")
-    st.markdown(f"""
-    - Approximate total characters: **{total_chars:,}**  
-    - Approx. total tokens: **{int(approx_tokens):,}**  
-    - Input tokens: **{int(input_tokens):,}** → **${input_cost:.2f}**  
-    - Output tokens: **{int(output_tokens):,}** → **${output_cost:.2f}**  
-    - 💰 **Estimated total cost: ${estimated_cost:.2f} USD**
-    """)
+# Replace old total category count logic to avoid duplicates
+def unique_combined_count(regex_list, gpt_list):
+    all_labels = set(regex_list) | set([label.strip() for label in gpt_list.split(",") if gpt_list])
+    return len(all_labels)
