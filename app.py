@@ -170,18 +170,14 @@ if uploaded_file:
         gpt_cats = ""
         if analysis_type != "Regex only":
             try:
-                prompt = generate_prompt(comment)
+                prompt = f"Text: '{comment}'
+Categories: {list(regex_patterns.keys())}
+Return matching category names only (comma-separated). Leave blank if none."
                 response = client.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[
-                        {
-                            "role": "system",
-                            "content": "You are a helpful classifier. Use the category hints in the user's prompt. Only return category names. Do not explain."
-                        },
-                        {
-                            "role": "user",
-                            "content": prompt
-                        }
+                        {"role": "system", "content": "Classify the text using the following list. Return matching category names only. If none match, return nothing."},
+                        {"role": "user", "content": prompt}
                     ],
                     max_tokens=80
                 )
@@ -189,7 +185,8 @@ if uploaded_file:
                 if gpt_cats.lower() in ["none", "no match", "nothing applies", "nothing"]:
                     gpt_cats = ""
             except Exception as e:
-                gpt_cats = f"GPT Error: {str(e)}"
+                st.error(f"❌ GPT Error on row {i + 1}: {str(e)}")
+                gpt_cats = ""
 
         all_unique = list(set(regex_cats) | set([cat.strip() for cat in gpt_cats.split(",") if gpt_cats]))
         category_counter.update(all_unique)
