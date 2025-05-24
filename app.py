@@ -139,7 +139,7 @@ category_hints = {
 category_list = ", ".join([f"{k} ({v})" for k, v in category_hints.items()])
 
 def generate_prompt(comment):
-    return f"""Here is the comment: '{comment}'
+        return f"""Here is the comment: '{comment}'
 
 Here are the categories with hints:
 {category_list}
@@ -170,13 +170,11 @@ if uploaded_file:
         gpt_cats = ""
         if analysis_type != "Regex only":
             try:
-                prompt = f"Text: '{comment}'
-Categories: {list(regex_patterns.keys())}
-Return matching category names only (comma-separated). Leave blank if none."
+                prompt = generate_prompt(comment)
                 response = client.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[
-                        {"role": "system", "content": "Classify the text using the following list. Return matching category names only. If none match, return nothing."},
+                        {"role": "system", "content": "You are a helpful classifier. Use the category hints in the user's prompt. Only return category names. Do not explain."},
                         {"role": "user", "content": prompt}
                     ],
                     max_tokens=80
