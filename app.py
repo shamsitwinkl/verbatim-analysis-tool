@@ -55,7 +55,7 @@ st.markdown("""
 This tool analyzes only the **`additional_comment`** column in your `.csv` file using **Regex**, **GPT-4o Mini**, or both. 
 It enriches the file and returns all original columns **plus** AI/Regex categorization columns.
 
-🧠 **Bonus:** At the end, it estimates **OpenAI API token usage and cost** based on character count in your data.
+🧠 At the end, it estimates **OpenAI API token usage and cost** based on character count in your data.
 
 🌱 If you have any issues, contact james.shamsi@twinkl.co.uk
 """)
