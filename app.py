@@ -7,44 +7,50 @@ import matplotlib.pyplot as plt
 from openai import OpenAI
 from collections import Counter
 
-# ✅ Password gate
+# ✅ Password gate before anything else
 st.set_page_config(page_title="Verbatim Analysis Tool", layout="centered")
 st.title("🔐 Enter Password")
 
 password = st.text_input("This tool is password protected. Please enter the password to continue:", type="password")
+
 if password != "5577":
     st.warning("❌ Incorrect or missing password. Please contact james.shamsi@twinkl.co.uk to request access.")
     st.stop()
 
-# ✅ API Key check
+# ✅ Load OpenAI key securely and validate it's present
 api_key = os.getenv("OPENAI_API_KEY")
 if not api_key:
-    st.error("❌ OPENAI_API_KEY not set.")
+    st.error("❌ OPENAI_API_KEY environment variable not set. Please check your Render settings.")
     st.stop()
 client = OpenAI(api_key=api_key)
 
-# ✅ UI Header
+# 🎨 Tool Info
 st.title("💖 Verbatim Analysis Tool")
-st.markdown("""
-This tool analyzes only the **`additional_comment`** column in your `.csv` file using **Regex**, **GPT-4o Mini**, or both.  
-It enriches the file and returns all original columns **plus** AI/Regex categorization columns.  
 
-🧠 At the end, it estimates **OpenAI API token usage and cost** based on character count in your data.  
+st.markdown("""
+This tool analyzes only the **`additional_comment`** column in your `.csv` file using **Regex**, **GPT-4o Mini**, or both. 
+It enriches the file and returns all original columns **plus** AI/Regex categorization columns.
+
+🧠 **Bonus:** At the end, it estimates **OpenAI API token usage and cost** based on character count in your data.
+
 🌱 If you have any issues, contact james.shamsi@twinkl.co.uk
 """)
 
+# User selection for analysis type
 analysis_type = st.radio("Choose what kind of analysis you want:", ["Regex only", "AI only", "Combined Regex + AI"])
+
+# File uploader
 uploaded_file = st.file_uploader("📤 Upload your .csv file", type=["csv"])
 
-# Regex categories
+# Regex patterns (40 total)
 regex_patterns = {
     "Search/Navigation": r"(?i)finding|to find|problem finding|issue|where.*find",
     "Resource Mention": r"(?i)worksheet|resource|work sheet|activity pack",
-    "User Question": r"(?i)\b(what|where|when|why|how|who|which|can|could|should)\b",
-    "Translation Mention": r"(?i)\btranslation\b|\btranslated\b|\btranslating\b",
+    "User Question": r"(?i)\\b(what|where|when|why|how|who|which|can|could|should)\\b",
+    "Translation Mention": r"(?i)\\btranslation\\b|\\btranslated\\b|\\btranslating\\b",
     "User Suggestion": r"(?i)suggestion|should|could|would|suggest|recommend",
     "Pain Point": r"(?i)problem|issue|bug|error|difficult",
-    "AI": r"(?i)\bAI\b|artificial intelligence|machine learning",
+    "AI": r"(?i)\\bAI\\b|artificial intelligence|machine learning",
     "Competitor": r"(?i)competitor|another provider|used to use",
     "Site Error": r"(?i)website error|site down|page missing",
     "Social Media": r"(?i)facebook|meta|instagram|twitter|social media",
@@ -52,7 +58,7 @@ regex_patterns = {
     "Twinkl Mention": r"(?i)twinkl",
     "Download Trouble": r"(?i)can't download|not downloading|download problem",
     "Payment Problem": r"(?i)payment|charge|billing|credit card",
-    "Video Mention": r"(?i)\bvideo\b|watch|YouTube",
+    "Video Mention": r"(?i)\\bvideo\\b|watch|YouTube",
     "Navigation": r"(?i)hard to find|navigation|menu|confusing",
     "Positive Experience": r"(?i)love|great|excellent|helpful|amazing",
     "Negative Experience": r"(?i)bad|hate|useless|frustrating|annoying",
@@ -61,7 +67,7 @@ regex_patterns = {
     "Account Access": r"(?i)account locked|cannot access",
     "Already Cancelled": r"(?i)cancel|canceled|cancelled|already cancelled",
     "Auto-renwal": r"(?i)auto.?renew|automatic renewal",
-    "Book Club": r"(?i)\bbook club\b|\bbooks\b",
+    "Book Club": r"(?i)\\bbook club\\b|\\bbooks\\b",
     "Cancellation difficulty": r"(?i)cancel(l|ing|led)? difficulty|can't cancel",
     "CS General": r"(?i)customer service|support team|agent",
     "CS Negative": r"(?i)(customer service|support).*(bad|unhelpful|rude)",
@@ -72,7 +78,7 @@ regex_patterns = {
     "Teacher Reference": r"(?i)i teach|my class|my students",
     "Child Mention": r"(?i)my child|son|daughter|kids",
     "Feedback General": r"(?i)feedback|thoughts|suggestions",
-    "Language Mention": r"(?i)\benglish\b|\bspanish\b|\bfrench\b",
+    "Language Mention": r"(?i)\\benglish\\b|\\bspanish\\b|\\bfrench\\b",
     "Error Feedback": r"(?i)wrong|error|typo|fix this",
     "Membership Issue": r"(?i)member(ship)?|sign up|join",
     "Mobile Use": r"(?i)phone|mobile|tablet|app",
@@ -83,35 +89,68 @@ regex_patterns = {
 def match_categories(text):
     return [label for label, pattern in regex_patterns.items() if re.search(pattern, text, re.IGNORECASE)]
 
-category_hints = {label: hint for label, hint in zip(regex_patterns.keys(), [
-    "trouble finding or navigating", "mentions worksheet", "asks a question",
-    "mentions translation", "offers a suggestion", "describes issue", "mentions AI",
-    "mentions another provider", "reports error", "mentions social media",
-    "mentions curriculum", "mentions Twinkl", "trouble downloading", "billing/payment",
-    "mentions video", "confusing menus", "praises experience", "negative experience",
-    "pricing feedback", "login problems", "account access", "already cancelled",
-    "auto-renewal", "mentions books", "can't cancel", "mentions customer service",
-    "negative support", "positive support", "negative words", "positive words",
-    "asks for help", "teacher reference", "mentions child", "general feedback",
-    "mentions languages", "mentions typos", "membership issues", "mentions phone/app",
-    "mentions subjects", "asks for topic"
-])}
+def unique_combined_count(regex_list, gpt_list):
+    all_labels = set(regex_list) | set([label.strip() for label in gpt_list.split(",") if gpt_list])
+    return len(all_labels)
+
+# Generate category hints string for prompt
+category_hints = {
+    "Search/Navigation": "trouble finding or navigating",
+    "Resource Mention": "mentions a worksheet or activity",
+    "User Question": "asks a question (who, what, where, how)",
+    "Translation Mention": "talks about translations or language",
+    "User Suggestion": "suggests a change or improvement",
+    "Pain Point": "describes an issue or frustration",
+    "AI": "mentions AI or artificial intelligence",
+    "Competitor": "mentions other companies or alternatives",
+    "Site Error": "describes a broken link or crash",
+    "Social Media": "mentions platforms like Facebook or Instagram",
+    "Curriculum Mention": "talks about key stages or curriculum",
+    "Twinkl Mention": "mentions the word Twinkl",
+    "Download Trouble": "mentions not being able to download",
+    "Payment Problem": "mentions billing or payment trouble",
+    "Video Mention": "references videos or watching",
+    "Navigation": "complains about confusing menus",
+    "Positive Experience": "praises the product or team",
+    "Negative Experience": "complains about the experience",
+    "Pricing Feedback": "mentions cost or pricing concerns",
+    "Login Issue": "can't login or has password issues",
+    "Account Access": "can't access their account",
+    "Already Cancelled": "talks about cancelling before",
+    "Auto-renwal": "mentions being charged again or auto-renewal",
+    "Book Club": "talks about books or reading",
+    "Cancellation difficulty": "can't cancel or finds it hard",
+    "CS General": "mentions customer service",
+    "CS Negative": "customer service was unhelpful",
+    "CS Positive": "customer service was helpful",
+    "Negative words": "uses words like awful or disappointed",
+    "Positive words": "uses words like awesome or amazing",
+    "Support Request": "asks for help",
+    "Teacher Reference": "says they are a teacher",
+    "Child Mention": "talks about their child",
+    "Feedback General": "mentions feedback",
+    "Language Mention": "mentions English, Spanish, French etc",
+    "Error Feedback": "mentions typos or factual errors",
+    "Membership Issue": "talks about becoming a member",
+    "Mobile Use": "mentions phones or tablets",
+    "Subject Mention": "mentions subjects like maths or science",
+    "Topic Request": "asks if you have a topic"
+}
 category_list = ", ".join([f"{k} ({v})" for k, v in category_hints.items()])
 
 def generate_prompt(comment):
-    return f"""Here is the comment: '{comment}'
-
-Here are the categories with hints:
-{category_list}
-
-Return a comma-separated list of relevant category names only. Leave blank if none."""
+    categories = ", ".join(regex_patterns.keys())
+    return f"Text: '{comment}'
+Categories: {categories}
+Return a comma-separated list of category names only. Leave blank if none."
 
 if uploaded_file:
     df = pd.read_csv(uploaded_file)
     df.columns = df.columns.str.strip().str.replace("﻿", "", regex=False)
 
     if "additional_comment" not in df.columns:
-        st.error("❌ Column 'additional_comment' not found.")
+        st.error("❌ Column 'additional_comment' not found in file.")
+        st.write("Available columns:", list(df.columns))
         st.stop()
 
     df["Regex Categories"] = ""
@@ -130,7 +169,7 @@ if uploaded_file:
         if analysis_type != "Regex only":
             try:
                 prompt = generate_prompt(comment)
-                st.text(f"[{i+1}] PROMPT SENT TO GPT:\n{prompt}")
+                
                 response = client.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[
@@ -140,7 +179,7 @@ if uploaded_file:
                     max_tokens=80
                 )
                 gpt_cats = response.choices[0].message.content.strip()
-                st.text(f"[{i+1}] GPT Response: {gpt_cats}")
+                
                 if gpt_cats.lower() in ["none", "no match", "nothing applies", "nothing"]:
                     gpt_cats = ""
             except Exception as e:
@@ -153,30 +192,3 @@ if uploaded_file:
         df.at[i, "Regex Categories"] = ", ".join(regex_cats)
         df.at[i, "GPT Categories"] = gpt_cats
         df.at[i, "Total Categories Found"] = len(all_unique)
-
-    # 📥 Download + Cost + Chart
-    st.markdown("### 📥 Download Your Enriched File")
-    st.download_button("📥 Download CSV", df.to_csv(index=False), "verbatim_analysis.csv", "text/csv")
-
-    st.markdown("### 💸 Estimated API Cost")
-    avg_prompt_chars = 150
-    input_tokens = (total_chars + len(df) * avg_prompt_chars) / 4
-    output_tokens = (len(df) * 80) / 4
-    input_cost = (input_tokens / 1000) * 0.005
-    output_cost = (output_tokens / 1000) * 0.015
-    estimated_cost = input_cost + output_cost
-
-    st.markdown(f"""
-    - Input tokens: **{int(input_tokens):,}** → **${input_cost:.2f}**  
-    - Output tokens: **{int(output_tokens):,}** → **${output_cost:.2f}**  
-    - 💰 Estimated total cost: **${estimated_cost:.2f}**
-    """)
-
-    st.markdown("### 📊 Top 10 Categories")
-    fig, ax = plt.subplots(figsize=(8, 5))
-    top_counts = dict(category_counter.most_common(10))
-    ax.barh(list(top_counts.keys()), list(top_counts.values()))
-    ax.invert_yaxis()
-    ax.set_xlabel("Matches")
-    ax.set_title("Top 10 Categories")
-    st.pyplot(fig)
