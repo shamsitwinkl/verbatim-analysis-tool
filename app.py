@@ -8,6 +8,9 @@ from openai import OpenAI
 from collections import Counter
 import time
 import io
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+import threading
 
 # ✅ Password gate before anything else
 st.set_page_config(page_title="Verbatim Analysis Tool", layout="centered")
@@ -59,6 +62,14 @@ It enriches the file and returns all original columns **plus** AI/Regex categori
 
 # User selection for analysis type
 analysis_type = st.radio("Choose what kind of analysis you want:", ["Regex only", "AI only", "Combined Regex + AI"])
+
+# Performance settings
+if analysis_type != "Regex only":
+    st.sidebar.header("⚡ Performance Settings")
+    batch_size = st.sidebar.slider("Batch Size (higher = faster but more memory)", 5, 50, 20, 
+                                   help="Number of comments processed simultaneously. Increase for speed, decrease if you get rate limit errors.")
+    max_workers = st.sidebar.slider("Max Workers", 1, 10, 5, 
+                                    help="Number of parallel threads. Increase for speed, but be careful of rate limits.")
 
 # File uploader
 uploaded_file = st.file_uploader("📤 Upload your .csv file", type=["csv"])
@@ -147,22 +158,47 @@ def analyze_with_gpt(comment, client, max_retries=3):
             if attempt == max_retries - 1:
                 st.warning(f"⚠️ GPT Error after {max_retries} attempts: {str(e)}")
                 return ""
-            time.sleep(1)  # Wait before retry
+            time.sleep(2 ** attempt)  # Exponential backoff
 
-def estimate_costs(total_chars, num_requests):
-    """Estimate OpenAI API costs"""
-    # GPT-4o-mini pricing (approximate)
-    input_cost_per_1k = 0.00015  # $0.15 per 1M tokens
-    output_cost_per_1k = 0.0006  # $0.60 per 1M tokens
+def process_batch_gpt(comments_batch, client):
+    """Process a batch of comments with threading"""
+    results = []
     
-    # Rough estimation: 4 chars per token
-    input_tokens = total_chars / 4
-    output_tokens = num_requests * 20  # Assume ~20 tokens per response
+    def process_single(comment):
+        return analyze_with_gpt(comment, client)
     
-    input_cost = (input_tokens / 1000) * input_cost_per_1k
-    output_cost = (output_tokens / 1000) * output_cost_per_1k
+    with ThreadPoolExecutor(max_workers=max_workers if 'max_workers' in locals() else 5) as executor:
+        results = list(executor.map(process_single, comments_batch))
     
-    return input_cost + output_cost, input_tokens, output_tokens
+    return results
+
+def estimate_costs(total_chars, num_requests, avg_response_length=20):
+    """Estimate OpenAI API costs with detailed breakdown"""
+    # GPT-4o-mini pricing (per 1M tokens)
+    input_cost_per_1m = 0.15   # $0.15 per 1M input tokens
+    output_cost_per_1m = 0.60  # $0.60 per 1M output tokens
+    
+    # Token estimation: roughly 4 characters per token
+    chars_per_token = 4
+    
+    # Calculate tokens
+    input_tokens = total_chars / chars_per_token
+    output_tokens = num_requests * avg_response_length
+    
+    # Calculate costs
+    input_cost = (input_tokens / 1_000_000) * input_cost_per_1m
+    output_cost = (output_tokens / 1_000_000) * output_cost_per_1m
+    total_cost = input_cost + output_cost
+    
+    return {
+        'total_cost': total_cost,
+        'input_cost': input_cost,
+        'output_cost': output_cost,
+        'input_tokens': input_tokens,
+        'output_tokens': output_tokens,
+        'total_chars': total_chars,
+        'num_requests': num_requests
+    }
 
 if uploaded_file:
     try:
@@ -188,8 +224,17 @@ if uploaded_file:
             st.warning("⚠️ No non-empty comments found to analyze.")
             st.stop()
         
+        # Show estimated processing time
+        if analysis_type != "Regex only":
+            estimated_time = len(non_empty_df) * 0.5  # Rough estimate
+            if analysis_type != "Regex only" and 'batch_size' in locals():
+                estimated_time = estimated_time / (batch_size / 10)  # Batching reduces time
+            st.info(f"⏱️ Estimated processing time: {estimated_time/60:.1f} minutes")
+        
         # Confirm analysis
         if st.button("🚀 Start Analysis", type="primary"):
+            start_time = time.time()
+            
             # Initialize new columns
             df["Regex Categories"] = ""
             df["GPT Categories"] = ""
@@ -203,55 +248,87 @@ if uploaded_file:
             progress_bar = st.progress(0)
             status_text = st.empty()
             
-            # Process each row
+            # Get comments to process
+            comments_to_process = []
+            indices_to_process = []
+            
             for i, row in df.iterrows():
-                comment = str(row["additional_comment"])
-                
-                # Skip empty comments
                 if pd.isna(row["additional_comment"]) or str(row["additional_comment"]).strip() == "":
                     continue
+                comments_to_process.append(str(row["additional_comment"]))
+                indices_to_process.append(i)
+                total_chars += len(str(row["additional_comment"]))
+            
+            # Process in batches for GPT
+            if analysis_type != "Regex only" and len(comments_to_process) > 0:
+                batch_size = batch_size if 'batch_size' in locals() else 20
                 
-                total_chars += len(comment)
-                
-                # Regex analysis
-                regex_cats = match_categories(comment) if analysis_type != "AI only" else []
-                
-                # GPT analysis
-                gpt_cats = ""
-                if analysis_type != "Regex only":
-                    gpt_cats = analyze_with_gpt(comment, client)
-                
-                # Combine results
-                gpt_cat_list = [cat.strip() for cat in gpt_cats.split(",") if gpt_cats and cat.strip()]
-                all_unique = list(set(regex_cats) | set(gpt_cat_list))
-                category_counter.update(all_unique)
-                
-                # Update dataframe
-                df.at[i, "Regex Categories"] = ", ".join(regex_cats)
-                df.at[i, "GPT Categories"] = gpt_cats
-                df.at[i, "Total Categories Found"] = len(all_unique)
-                
-                processed_count += 1
-                
-                # Update progress
-                progress = processed_count / len(non_empty_df)
-                progress_bar.progress(progress)
-                status_text.text(f"Processing row {processed_count}/{len(non_empty_df)}")
+                for batch_start in range(0, len(comments_to_process), batch_size):
+                    batch_end = min(batch_start + batch_size, len(comments_to_process))
+                    batch_comments = comments_to_process[batch_start:batch_end]
+                    batch_indices = indices_to_process[batch_start:batch_end]
+                    
+                    status_text.text(f"Processing batch {batch_start//batch_size + 1}/{(len(comments_to_process)-1)//batch_size + 1}")
+                    
+                    # Process batch with GPT
+                    gpt_results = process_batch_gpt(batch_comments, client)
+                    
+                    # Process each comment in the batch
+                    for j, (comment, idx, gpt_result) in enumerate(zip(batch_comments, batch_indices, gpt_results)):
+                        # Regex analysis
+                        regex_cats = match_categories(comment) if analysis_type != "AI only" else []
+                        
+                        # Combine results
+                        gpt_cat_list = [cat.strip() for cat in gpt_result.split(",") if gpt_result and cat.strip()]
+                        all_unique = list(set(regex_cats) | set(gpt_cat_list))
+                        category_counter.update(all_unique)
+                        
+                        # Update dataframe
+                        df.at[idx, "Regex Categories"] = ", ".join(regex_cats)
+                        df.at[idx, "GPT Categories"] = gpt_result
+                        df.at[idx, "Total Categories Found"] = len(all_unique)
+                        
+                        processed_count += 1
+                        
+                        # Update progress
+                        progress = processed_count / len(comments_to_process)
+                        progress_bar.progress(progress)
+                    
+                    # Small delay between batches to avoid rate limits
+                    time.sleep(0.5)
+            
+            else:
+                # Regex only processing
+                for comment, idx in zip(comments_to_process, indices_to_process):
+                    regex_cats = match_categories(comment)
+                    category_counter.update(regex_cats)
+                    
+                    df.at[idx, "Regex Categories"] = ", ".join(regex_cats)
+                    df.at[idx, "Total Categories Found"] = len(regex_cats)
+                    
+                    processed_count += 1
+                    progress = processed_count / len(comments_to_process)
+                    progress_bar.progress(progress)
+            
+            end_time = time.time()
+            processing_time = end_time - start_time
             
             progress_bar.progress(1.0)
-            status_text.text("✅ Analysis complete!")
+            status_text.text(f"✅ Analysis complete! Processed in {processing_time:.1f} seconds")
             
             # Display results
             st.subheader("📈 Analysis Results")
             
-            col1, col2, col3 = st.columns(3)
+            col1, col2, col3, col4 = st.columns(4)
             with col1:
-                st.metric("Total Comments", len(non_empty_df))
+                st.metric("Total Comments", len(comments_to_process))
             with col2:
                 st.metric("Categories Used", len(category_counter))
             with col3:
                 avg_cats = df["Total Categories Found"].mean()
                 st.metric("Avg Categories/Comment", f"{avg_cats:.1f}")
+            with col4:
+                st.metric("Processing Time", f"{processing_time:.1f}s")
             
             # Category distribution
             if category_counter:
@@ -266,18 +343,56 @@ if uploaded_file:
                 plt.tight_layout()
                 st.pyplot(fig)
             
-            # Cost estimation
+            # Enhanced cost estimation
             if analysis_type != "Regex only":
-                st.subheader("💰 Cost Estimation")
-                estimated_cost, input_tokens, output_tokens = estimate_costs(total_chars, processed_count)
+                st.subheader("💰 OpenAI API Cost Estimation")
                 
+                cost_details = estimate_costs(total_chars, processed_count)
+                
+                # Create columns for cost breakdown
                 col1, col2, col3 = st.columns(3)
                 with col1:
-                    st.metric("Estimated Cost", f"${estimated_cost:.4f}")
+                    st.metric("**Total Estimated Cost**", f"${cost_details['total_cost']:.4f}")
                 with col2:
-                    st.metric("Input Tokens", f"{input_tokens:,.0f}")
+                    st.metric("Input Cost", f"${cost_details['input_cost']:.4f}")
                 with col3:
-                    st.metric("Output Tokens", f"{output_tokens:,.0f}")
+                    st.metric("Output Cost", f"${cost_details['output_cost']:.4f}")
+                
+                # Detailed breakdown
+                st.markdown("#### 🔍 Calculation Breakdown")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.markdown("""
+                    **💰 GPT-4o Mini Token Pricing**
+                    - **Input**: $0.15 per 1M tokens
+                    - **Output**: $0.60 per 1M tokens
+                    """)
+                    
+                with col2:
+                    st.markdown(f"""
+                    **📊 Usage Statistics**
+                    - **Total Characters**: {cost_details['total_chars']:,}
+                    - **API Requests**: {cost_details['num_requests']:,}
+                    - **Input Tokens**: {cost_details['input_tokens']:,.0f}
+                    - **Output Tokens**: {cost_details['output_tokens']:,.0f}
+                    """)
+                
+                # Calculation formula
+                with st.expander("📝 How We Calculate Costs"):
+                    st.markdown(f"""
+                    **Token Estimation:**
+                    - Characters to tokens: ~4 characters = 1 token
+                    - Input tokens = {cost_details['total_chars']:,} chars ÷ 4 = {cost_details['input_tokens']:,.0f} tokens
+                    - Output tokens = {cost_details['num_requests']:,} requests × 20 avg tokens = {cost_details['output_tokens']:,.0f} tokens
+                    
+                    **Cost Calculation:**
+                    - Input cost = ({cost_details['input_tokens']:,.0f} ÷ 1,000,000) × $0.15 = ${cost_details['input_cost']:.4f}
+                    - Output cost = ({cost_details['output_tokens']:,.0f} ÷ 1,000,000) × $0.60 = ${cost_details['output_cost']:.4f}
+                    - **Total = ${cost_details['total_cost']:.4f}**
+                    
+                    *Note: This is an estimate. Actual costs may vary slightly based on exact tokenization.*
+                    """)
             
             # Download processed file
             st.subheader("📥 Download Results")
@@ -302,6 +417,17 @@ if uploaded_file:
     except Exception as e:
         st.error(f"❌ Error processing file: {str(e)}")
         st.write("Please check your file format and try again.")
+
+# Performance tips
+if analysis_type != "Regex only":
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("""
+    ### ⚡ Speed Tips
+    - **Increase batch size** for faster processing
+    - **Reduce max workers** if you hit rate limits
+    - **Regex only** is fastest for large datasets
+    - Processing ~100 comments takes 1-2 minutes
+    """)
 
 # Footer
 st.markdown("---")
